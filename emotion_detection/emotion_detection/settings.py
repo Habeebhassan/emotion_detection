@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 ASSEMBLYAI_API_KEY = os.getenv("ASSEMBLYAI_API_KEY")
-CLIENT_SECRETS_FILE=os.getenv("../client_secret_393908793020-tahceb69n7oigbhks4havcjciguec1m0.apps.googleusercontent.com.json")
+CLIENT_SECRETS_FILE=os.getenv("../../client_secret_393908793020-tahceb69n7oigbhks4havcjciguec1m0.apps.googleusercontent.com.json")
 
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -46,6 +46,8 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django_extensions',
+    'rest_framework',
     
     # analyze emotions 
     'analysis',
