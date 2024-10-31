@@ -12,7 +12,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 # Path to your downloaded OAuth credentials file
-CLIENT_SECRETS_FILE = "../../../client_secret_393908793020-tahceb69n7oigbhks4havcjciguec1m0.apps.googleusercontent.com.json"
+CLIENT_SECRETS_FILE = "../../client_secret_393908793020-tahceb69n7oigbhks4havcjciguec1m0.apps.googleusercontent.com.json"
 # Scopes required for the Generative Language API
 SCOPES = [
     "https://www.googleapis.com/auth/generative-language.tuning",
