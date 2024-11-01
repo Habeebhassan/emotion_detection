@@ -11,10 +11,10 @@ class AudioEmotionAnalysis(models.Model):
         confidence_score (float): Confidence level of the emotion prediction.
         analyzed_at (datetime): Timestamp of when the audio was analyzed.
     """
-    audio_file_url = models.URLField(help_text="URL of the audio file for analysis.")
-    transcript_text = models.TextField(help_text="Transcribed text from the audio.")
-    emotion = models.CharField(max_length=50, help_text="Predicted emotion label.")
-    confidence_score = models.FloatField(help_text="Confidence level of the emotion prediction.")
+    audio_file = models.FileField(upload_to='audio_files/', help_text='Uploaded audio file for analysis.')
+    transcript_text = models.TextField(help_text="Transcribed text from the audio.", default="")
+    emotion = models.CharField(max_length=50, help_text="Predicted emotion label.", default="unknown")
+    confidence_score = models.FloatField(help_text="Confidence level of the emotion prediction.", default=0.0)
     analyzed_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp of the analysis.")
 
     def __str__(self):
