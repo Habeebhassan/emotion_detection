@@ -186,21 +186,30 @@ class AudioEmotionAnalysisView(APIView):
 
         Returns:
             dict: A dictionary containing the transcription text and speaker labels 
-                  or an error message if transcription fails.
+                or an error message if transcription fails.
         """
-        transcriber = aai.Transcriber()
-        config = aai.TranscriptionConfig(speaker_labels=True)
+        try:
+            transcriber = aai.Transcriber()
+            config = aai.TranscriptionConfig(speaker_labels=True)
 
-        # Transcribe the audio file
-        transcript = transcriber.transcribe(audio_file_path, config)
+            # Attempt transcription of the audio file
+            transcript = transcriber.transcribe(audio_file_path, config)
 
-        if transcript.status == aai.TranscriptStatus.error:
-            return {"error": f"Transcription failed: {transcript.error}"}
+            # Check if transcription was successful
+            if transcript.status == aai.TranscriptStatus.error:
+                return {"error": f"Transcription failed: {transcript.error}"}
 
-        return {
-            'transcript_text': transcript.text,
-            'speaker_labels': transcript.speaker_labels
+            # Safely access speaker labels, providing an empty list if missing
+            speaker_labels = getattr(transcript, "speaker_labels", [])
+            
+            return {
+                'transcript_text': transcript.text,
+                'speaker_labels': speaker_labels
         }
+    
+        except Exception as e:
+            # Capture any other unexpected exceptions and return an error message
+            return {"error": f"An error occurred during transcription: {str(e)}"}
 
     def analyze_emotion(self, text):
         """
@@ -217,7 +226,7 @@ class AudioEmotionAnalysisView(APIView):
                   or an error message if the API call fails.
         """
         # Perform OAuth 2.0 flow for authorization
-        flow = InstalledAppFlow.from_client_secrets_file(settings.CLIENT_SECRETS_FILE, settings.SCOPES)
+        flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRETS_FILE, SCOPES)
         credentials = flow.run_local_server(port=8080)
         access_token = credentials.token
 
@@ -243,7 +252,8 @@ class AudioEmotionAnalysisView(APIView):
         }
 
         # Send request to Gemini API
-        response = requests.post(f"{api_endpoint}?key={settings.GEMINI_API_KEY}", json=payload, headers=headers, timeout=120)
+        api_key = "AIzaSyD46CMD2uVfdLQYTgCHTaqX7A4VSQpadSg"
+        response = requests.post(f"{api_endpoint}?key={api_key}", json=payload, headers=headers)
 
         if response.status_code == 200:
             result = response.json()
