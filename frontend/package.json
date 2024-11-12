@@ -1,0 +1,20 @@
+{
+  "name": "mental_health",
+  "version": "1.0.0",
+  "description": "frontend for mental health detection API ",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Habeebhassan/emotion_detections_frontend.git"
+  },
+  "author": "habeeb hassan",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Habeebhassan/emotion_detections_frontend/issues"
+  },
+  "homepage": "https://github.com/Habeebhassan/emotion_detections_frontend#readme"
+}

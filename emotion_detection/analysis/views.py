@@ -2,48 +2,50 @@ from django.shortcuts import render
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from transformers import AutoTokenizer, AutoModel
+import torch  # Required for tensor operations
 from .serializers import TextEmotionAnalysisSerializer, AudioEmotionAnalysisSerializer
-
-import requests
-import os
 import assemblyai as aai
-from google_auth_oauthlib.flow import InstalledAppFlow
+import os
+import requests
+from dotenv import load_dotenv
 import logging
 
+# Load environment variables from .env file
+load_dotenv()
+
+# Set up logging
 logger = logging.getLogger(__name__)
-# Path to your downloaded OAuth credentials file
-CLIENT_SECRETS_FILE = "../../client_secret_393908793020-tahceb69n7oigbhks4havcjciguec1m0.apps.googleusercontent.com.json"
-# Scopes required for the Generative Language API
-SCOPES = [
-    "https://www.googleapis.com/auth/generative-language.tuning",
-    "https://www.googleapis.com/auth/cloud-platform"
-]
+
+# Retrieve the Hugging Face token from the environment
+hf_token = os.getenv("HUGGINGFACE_TOKEN")
 
 # Set up AssemblyAI API key
-aai.settings.api_key = os.getenv("ASSEMBLYAI_API_KEY")  # Ensure you have your API key in your environment variables
+aai.settings.api_key = os.getenv("ASSEMBLYAI_API_KEY")
 
-# View for Text Emotion Detection
+# Initialize the tokenizer and model for Mental-BERT
+tokenizer = AutoTokenizer.from_pretrained("mental/mental-bert-base-uncased", use_auth_token=hf_token)
+model = AutoModel.from_pretrained("mental/mental-bert-base-uncased", use_auth_token=hf_token)
+
+# Define labels based on model's intended classifications
+LABELS = {
+    0: "No Depression", 1: "Depression",
+    2: "No Suicide", 3: "Suicide",
+    4: "No Distress", 5: "Distress"
+}
+
 class TextEmotionAnalysisView(APIView):
     """
-    API view for analyzing the emotional content of text input using the Gemini API.
+    API view for analyzing the mental health status of text input using Mental-BERT.
     """
 
     def post(self, request):
         """
-        Handle POST requests to analyze text emotions.
-
-        Validates incoming data, processes the text through the Gemini API,
-        and saves the detected emotions in the database.
-
-        Args:
-            request (Request): The incoming HTTP request containing text data.
-
-        Returns:
-            Response: A JSON response containing the input text and the detected emotions,
-                      or an error message if validation fails or if there are issues with the analysis.
+        Handle POST requests to analyze text for mental health conditions like Depression, Suicide, and Distress.
         """
         from .text_model import TextEmotionAnalysis
         serializer = TextEmotionAnalysisSerializer(data=request.data)
+        
         if serializer.is_valid():
             input_text = serializer.validated_data.get('input_text')
             emotion_analysis_result = self.analyze_emotion(input_text)
@@ -69,86 +71,39 @@ class TextEmotionAnalysisView(APIView):
 
     def analyze_emotion(self, input_text):
         """
-        Interact with the Gemini API to analyze emotions in the given text.
-
-        Args:
-            input_text (str): The text input to be analyzed for emotional content.
-
-        Returns:
-            dict: A dictionary containing the predicted emotion and confidence score, or an error message if the API call fails.
+        Analyze the mental health content of the input text using Mental-BERT.
         """
-        # Perform the OAuth 2.0 flow to get credentials
-        flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRETS_FILE, SCOPES)
-        credentials = flow.run_local_server(port=8080)
-        access_token = credentials.token
+        try:
+            # Tokenize and encode the input text
+            inputs = tokenizer(input_text, return_tensors="pt")
+            outputs = model(**inputs)
 
-        # Define the Gemini API endpoint and headers
-        api_key = "AIzaSyD46CMD2uVfdLQYTgCHTaqX7A4VSQpadSg"
-        api_endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent"
+            # Assuming the model outputs logits for classification, apply softmax for probabilities
+            logits = outputs.last_hidden_state[:, 0, :]  # Use CLS token representation
+            probs = torch.softmax(logits, dim=1)
+            max_prob, max_index = torch.max(probs, dim=1)
 
-        # Prepare the prompt for emotion analysis
-        modified_input_text = f"{input_text} Analyze the emotional state of the speaker."
+            # Get the predicted emotion label and confidence score
+            predicted_label = max_index.item()
+            confidence_score = max_prob.item()
 
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {
-                            "text": modified_input_text
-                        }
-                    ]
-                }
-            ]
-        }
+            # Map the label to a more readable form
+            emotion = LABELS.get(predicted_label, "Unknown")
+            
+            return {'emotion': emotion, 'confidence_score': confidence_score}
 
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json"
-        }
-
-        # Send request to Gemini API
-        response = requests.post(f"{api_endpoint}?key={api_key}", json=payload, headers=headers)
-
-        # Handle response and extract emotion
-        if response.status_code == 200:
-            result = response.json()
-            emotion_text = result.get("contents", [{}])[0].get("parts", [{}])[0].get("text", "unknown")
-            confidence_score = 0.95  # Replace with actual confidence score if available
-            return {'emotion': emotion_text, 'confidence_score': confidence_score}
-        else:
-            return {"error": f"Error {response.status_code}: {response.text}"}
-
+        except Exception as e:
+            logger.error(f"Error analyzing emotion: {e}")
+            return {"error": str(e)}
 
 class AudioEmotionAnalysisView(APIView):
     """
-    API view for analyzing emotions from an audio input.
-    
-    This view handles audio file uploads, transcribes the audio to text using AssemblyAI, 
-    analyzes the emotional state of the speaker based on the transcription using the Gemini API, 
-    and saves the analysis results to the database.
-
-    Methods:
-        post(request, *args, **kwargs): Handles POST requests to analyze uploaded audio files.
-        transcribe_audio(audio_file_path): Transcribes the provided audio file.
-        analyze_emotion(text): Predicts the emotional content of the provided text.
+    API view for analyzing mental health status from an audio input.
     """
-    
+
     def post(self, request, *args, **kwargs):
-        """
-        Handles POST requests to analyze emotions from an audio file.
-
-        This method validates the incoming request, uploads the audio file,
-        transcribes the file using AssemblyAI, predicts emotions using the Gemini API, 
-        and saves the analysis results in the database.
-
-        Args:
-            request (Request): The incoming HTTP request containing the audio file.
-
-        Returns:
-            Response: JSON response with the audio file path, transcription, 
-                      predicted emotions, confidence score, or an error message.
-        """
         serializer = AudioEmotionAnalysisSerializer(data=request.data)
+        
         if serializer.is_valid():
             audio_file = request.FILES['audio_file']
             
@@ -161,7 +116,7 @@ class AudioEmotionAnalysisView(APIView):
             if "error" in transcription_result:
                 return Response({"error": transcription_result["error"]}, status=status.HTTP_400_BAD_REQUEST)
 
-            # Analyze the transcription for emotions
+            # Analyze the transcription for mental health status
             emotion_analysis_result = self.analyze_emotion(transcription_result['transcript_text'])
 
             if "error" in emotion_analysis_result:
@@ -180,13 +135,6 @@ class AudioEmotionAnalysisView(APIView):
     def transcribe_audio(self, audio_file_path):
         """
         Transcribes the audio file at the specified path using AssemblyAI.
-
-        Args:
-            audio_file_path (str): The path to the audio file for transcription.
-
-        Returns:
-            dict: A dictionary containing the transcription text and speaker labels 
-                or an error message if transcription fails.
         """
         try:
             transcriber = aai.Transcriber()
@@ -195,163 +143,252 @@ class AudioEmotionAnalysisView(APIView):
             # Attempt transcription of the audio file
             transcript = transcriber.transcribe(audio_file_path, config)
 
-            # Check if transcription was successful
             if transcript.status == aai.TranscriptStatus.error:
                 return {"error": f"Transcription failed: {transcript.error}"}
 
-            # Safely access speaker labels, providing an empty list if missing
             speaker_labels = getattr(transcript, "speaker_labels", [])
-            
             return {
                 'transcript_text': transcript.text,
                 'speaker_labels': speaker_labels
-        }
-    
+            }
         except Exception as e:
-            # Capture any other unexpected exceptions and return an error message
+            logger.error(f"Error during transcription: {e}")
             return {"error": f"An error occurred during transcription: {str(e)}"}
 
     def analyze_emotion(self, text):
         """
-        Analyzes the emotional content of transcribed text using the Gemini API.
-
-        This method initiates an OAuth flow for authorization, sends the transcribed text
-        to the Gemini API for emotion analysis, and extracts the emotion and confidence score.
-
-        Args:
-            text (str): The transcribed text to analyze for emotions.
-
-        Returns:
-            dict: A dictionary containing the predicted emotion and confidence score 
-                  or an error message if the API call fails.
+        Analyze the mental health content of the transcribed text using Mental-BERT.
         """
-        # Perform OAuth 2.0 flow for authorization
-        flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRETS_FILE, SCOPES)
-        credentials = flow.run_local_server(port=8080)
-        access_token = credentials.token
+        try:
+            # Tokenize and encode the text
+            inputs = tokenizer(text, return_tensors="pt")
+            outputs = model(**inputs)
 
-        # Define Gemini API endpoint
-        api_endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent"
-        modified_input_text = f"{text} Analyze the emotional state of the speaker."
+            # Use logits for classification and softmax for probabilities
+            logits = outputs.last_hidden_state[:, 0, :]
+            probs = torch.softmax(logits, dim=1)
+            max_prob, max_index = torch.max(probs, dim=1)
 
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {
-                            "text": modified_input_text
-                        }
-                    ]
-                }
-            ]
-        }
-
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json"
-        }
-
-        # Send request to Gemini API
-        api_key = "AIzaSyD46CMD2uVfdLQYTgCHTaqX7A4VSQpadSg"
-        response = requests.post(f"{api_endpoint}?key={api_key}", json=payload, headers=headers)
-
-        if response.status_code == 200:
-            result = response.json()
-            emotion_text = result.get("contents", [{}])[0].get("parts", [{}])[0].get("text", "unknown")
-            confidence_score = result.get("confidence_score", 0.95)  # Replace with actual confidence score if available
-            return {'emotion': emotion_text, 'confidence_score': confidence_score}
-        else:
-            return {"error": f"Error {response.status_code}: {response.text}"}
+            # Map the predicted label and return with confidence score
+            predicted_label = max_index.item()
+            confidence_score = max_prob.item()
+            emotion = LABELS.get(predicted_label, "Unknown")
+            
+            return {'emotion': emotion, 'confidence_score': confidence_score}
+        except Exception as e:
+            logger.error(f"Error analyzing emotion: {e}")
+            return {"error": str(e)}
 
 
-# # View for Audio Emotion Detection
-# class AudioEmotionAnalysisView(APIView):
+# from django.shortcuts import render
+# from rest_framework.views import APIView
+# from rest_framework.response import Response
+# from rest_framework import status
+# from .serializers import TextEmotionAnalysisSerializer, AudioEmotionAnalysisSerializer
+
+# import requests
+# import os
+# import assemblyai as aai
+# from google_auth_oauthlib.flow import InstalledAppFlow
+# import logging
+
+# from transformers import pipeline  # Import the Hugging Face pipeline for NLP tasks
+# import assemblyai as aai
+# import os
+# import requests
+# import logging
+
+# logger = logging.getLogger(__name__)
+
+# # Set up AssemblyAI API key
+# aai.settings.api_key = os.getenv("ASSEMBLYAI_API_KEY")
+
+# # Initialize the Hugging Face DistilBERT pipeline for sentiment analysis
+# emotion_classifier = pipeline("sentiment-analysis", model="distilbert-base-uncased")
+
+# class TextEmotionAnalysisView(APIView):
 #     """
-#     API view for analyzing the emotional content of audio input by transcribing speech to text
-#     and predicting the emotion of the speaker using the Gemini API.
+#     API view for analyzing the emotional content of text input using DistilBERT.
 #     """
 
-#     def post(self, request, *args, **kwargs):
+#     def post(self, request):
 #         """
-#         Handle POST requests to analyze audio emotions.
+#         Handle POST requests to analyze text emotions.
 
-#         Validates incoming data, transcribes the audio using the AssemblyAI API,
-#         and predicts the emotional state of the speaker based on the transcription,
-#         saving the results to the database.
-
-#         Args:
-#             request (Request): The incoming HTTP request containing the audio file.
-
-#         Returns:
-#             Response: A JSON response containing the audio file, the transcribed text,
-#                       and predicted emotions, or an error message if validation fails
-#                       or if transcription fails.
+#         Validates incoming data, processes the text through DistilBERT,
+#         and saves the detected emotions in the database.
 #         """
-#         from .audio_model import AudioEmotionAnalysis as AudioAnalysisModel
-#         serializer = AudioEmotionAnalysisSerializer(data=request.data)
+#         from .text_model import TextEmotionAnalysis
+#         serializer = TextEmotionAnalysisSerializer(data=request.data)
 #         if serializer.is_valid():
-#             audio_file = serializer.validated_data.get('audio_file_url')
-
-#             # Use AssemblyAI to transcribe the audio
-#             transcription_result = self.transcribe_audio(audio_file)
-
-#             if "error" in transcription_result:
-#                 return Response({"error": transcription_result["error"]}, status=status.HTTP_400_BAD_REQUEST)
-
-#             # Use the transcribed text to analyze emotion
-#             emotion_analysis_result = self.analyze_emotion(transcription_result['transcript_text'])
+#             input_text = serializer.validated_data.get('input_text')
+#             emotion_analysis_result = self.analyze_emotion(input_text)
 
 #             if "error" in emotion_analysis_result:
 #                 return Response({"error": emotion_analysis_result["error"]}, status=status.HTTP_400_BAD_REQUEST)
 
 #             # Save the analysis result to the database
-#             analysis_record = AudioAnalysisModel(
-#                 audio_file_url=str(audio_file),
-#                 transcript_text=transcription_result['transcript_text'],
+#             analysis_record = TextEmotionAnalysis(
+#                 input_text=input_text,
 #                 emotion=emotion_analysis_result['emotion'],
 #                 confidence_score=emotion_analysis_result['confidence_score']
 #             )
 #             analysis_record.save()
 
 #             return Response({
-#                 'audio_file': str(audio_file),
-#                 'transcription': transcription_result['transcript_text'],
+#                 'input_text': input_text,
 #                 'predicted_emotion': emotion_analysis_result['emotion'],
 #                 'confidence_score': emotion_analysis_result['confidence_score']
 #             }, status=status.HTTP_200_OK)
 
 #         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-#     def transcribe_audio(self, audio_file):
+#     def analyze_emotion(self, input_text):
 #         """
-#         Transcribe the audio file using AssemblyAI.
-
-#         Args:
-#             audio_file (File): The audio file to be transcribed.
-
-#         Returns:
-#             dict: A dictionary containing the transcribed text or an error message if transcription fails.
+#         Analyze the emotional content of the input text using DistilBERT.
 #         """
-#         transcriber = aai.Transcriber()
-#         config = aai.TranscriptionConfig(speaker_labels=True)
+#         try:
+#             # Using the sentiment-analysis pipeline from Hugging Face
+#             result = emotion_classifier(input_text)
+#             emotion = result[0]['label']
+#             confidence_score = result[0]['score']
+#             return {'emotion': emotion, 'confidence_score': confidence_score}
+#         except Exception as e:
+#             return {"error": str(e)}
 
-#         # Transcribe the audio file
-#         transcript = transcriber.transcribe(audio_file, config)
+# class AudioEmotionAnalysisView(APIView):
+#     """
+#     API view for analyzing emotions from an audio input.
+#     """
 
-#         if transcript.status == aai.TranscriptStatus.error:
-#             return {"error": f"Transcription failed: {transcript.error}"}
+#     def post(self, request, *args, **kwargs):
+#         serializer = AudioEmotionAnalysisSerializer(data=request.data)
+#         if serializer.is_valid():
+#             audio_file = request.FILES['audio_file']
+            
+#             # Save the audio file to initiate transcription and analysis
+#             instance = serializer.save()
 
-#         return {
-#             'transcript_text': transcript.text,
-#             'speaker_labels': transcript.speaker_labels
-#         }
+#             # Transcribe the audio using AssemblyAI
+#             transcription_result = self.transcribe_audio(instance.audio_file.path)
+
+#             if "error" in transcription_result:
+#                 return Response({"error": transcription_result["error"]}, status=status.HTTP_400_BAD_REQUEST)
+
+#             # Analyze the transcription for emotions
+#             emotion_analysis_result = self.analyze_emotion(transcription_result['transcript_text'])
+
+#             if "error" in emotion_analysis_result:
+#                 return Response({"error": emotion_analysis_result["error"]}, status=status.HTTP_400_BAD_REQUEST)
+
+#             # Save results to the database
+#             instance.transcript_text = transcription_result['transcript_text']
+#             instance.emotion = emotion_analysis_result['emotion']
+#             instance.confidence_score = emotion_analysis_result['confidence_score']
+#             instance.save()
+
+#             return Response(AudioEmotionAnalysisSerializer(instance).data, status=status.HTTP_200_OK)
+        
+#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+#     def transcribe_audio(self, audio_file_path):
+#         """
+#         Transcribes the audio file at the specified path using AssemblyAI.
+#         """
+#         try:
+#             transcriber = aai.Transcriber()
+#             config = aai.TranscriptionConfig(speaker_labels=True)
+
+#             # Attempt transcription of the audio file
+#             transcript = transcriber.transcribe(audio_file_path, config)
+
+#             if transcript.status == aai.TranscriptStatus.error:
+#                 return {"error": f"Transcription failed: {transcript.error}"}
+
+#             speaker_labels = getattr(transcript, "speaker_labels", [])
+#             return {
+#                 'transcript_text': transcript.text,
+#                 'speaker_labels': speaker_labels
+#             }
+#         except Exception as e:
+#             return {"error": f"An error occurred during transcription: {str(e)}"}
 
 #     def analyze_emotion(self, text):
 #         """
-#         Analyze the emotional state of the speaker based on transcribed text using the Gemini API.
+#         Analyze the emotional content of the transcribed text using DistilBERT.
+#         """
+#         try:
+#             result = emotion_classifier(text)
+#             emotion = result[0]['label']
+#             confidence_score = result[0]['score']
+#             return {'emotion': emotion, 'confidence_score': confidence_score}
+#         except Exception as e:
+#             return {"error": str(e)}
+
+
+# logger = logging.getLogger(__name__)
+# # Path to your downloaded OAuth credentials file
+# CLIENT_SECRETS_FILE = "../../client_secret_393908793020-tahceb69n7oigbhks4havcjciguec1m0.apps.googleusercontent.com.json"
+# # Scopes required for the Generative Language API
+# SCOPES = [
+#     "https://www.googleapis.com/auth/generative-language.tuning",
+#     "https://www.googleapis.com/auth/cloud-platform"
+# ]
+
+# # Set up AssemblyAI API key
+# aai.settings.api_key = os.getenv("ASSEMBLYAI_API_KEY")  # Ensure you have your API key in your environment variables
+
+# # View for Text Emotion Detection
+# class TextEmotionAnalysisView(APIView):
+#     """
+#     API view for analyzing the emotional content of text input using the Gemini API.
+#     """
+
+#     def post(self, request):
+#         """
+#         Handle POST requests to analyze text emotions.
+
+#         Validates incoming data, processes the text through the Gemini API,
+#         and saves the detected emotions in the database.
 
 #         Args:
-#             text (str): The transcribed text to analyze.
+#             request (Request): The incoming HTTP request containing text data.
+
+#         Returns:
+#             Response: A JSON response containing the input text and the detected emotions,
+#                       or an error message if validation fails or if there are issues with the analysis.
+#         """
+#         from .text_model import TextEmotionAnalysis
+#         serializer = TextEmotionAnalysisSerializer(data=request.data)
+#         if serializer.is_valid():
+#             input_text = serializer.validated_data.get('input_text')
+#             emotion_analysis_result = self.analyze_emotion(input_text)
+
+#             if "error" in emotion_analysis_result:
+#                 return Response({"error": emotion_analysis_result["error"]}, status=status.HTTP_400_BAD_REQUEST)
+
+#             # Save the analysis result to the database
+#             analysis_record = TextEmotionAnalysis(
+#                 input_text=input_text,
+#                 emotion=emotion_analysis_result['emotion'],
+#                 confidence_score=emotion_analysis_result['confidence_score']
+#             )
+#             analysis_record.save()
+
+#             return Response({
+#                 'input_text': input_text,
+#                 'predicted_emotion': emotion_analysis_result['emotion'],
+#                 'confidence_score': emotion_analysis_result['confidence_score']
+#             }, status=status.HTTP_200_OK)
+
+#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+#     def analyze_emotion(self, input_text):
+#         """
+#         Interact with the Gemini API to analyze emotions in the given text.
+
+#         Args:
+#             input_text (str): The text input to be analyzed for emotional content.
 
 #         Returns:
 #             dict: A dictionary containing the predicted emotion and confidence score, or an error message if the API call fails.
@@ -366,7 +403,7 @@ class AudioEmotionAnalysisView(APIView):
 #         api_endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent"
 
 #         # Prepare the prompt for emotion analysis
-#         modified_input_text = f"{text} Analyze the emotional state of the speaker."
+#         modified_input_text = f"{input_text} Analyze the emotional state of the speaker."
 
 #         payload = {
 #             "contents": [
@@ -392,93 +429,127 @@ class AudioEmotionAnalysisView(APIView):
 #         if response.status_code == 200:
 #             result = response.json()
 #             emotion_text = result.get("contents", [{}])[0].get("parts", [{}])[0].get("text", "unknown")
-#             confidence_score = result.get("confidence_score", 0.95)  # Replace with actual confidence score if available
+#             confidence_score = 0.95  # Replace with actual confidence score if available
 #             return {'emotion': emotion_text, 'confidence_score': confidence_score}
 #         else:
 #             return {"error": f"Error {response.status_code}: {response.text}"}
 
-# from django.shortcuts import render
-# from rest_framework.views import APIView
-# from rest_framework.response import Response
-# from rest_framework import status
-# from .serializers import TextEmotionAnalysisSerializer, AudioEmotionAnalysisSerializer
-# from .text_model import TextEmotionAnalysis
-# from .audio_model import AudioEmotionAnalysis
-# import assemblyai as aai
-# from google.oauth2.credentials import Credentials
-# from google_auth_oauthlib.flow import InstalledAppFlow
-# import requests
-# import json
-# import os
 
-# # Path to your downloaded OAuth credentials file
-# CLIENT_SECRETS_FILE = os.getenv("CLIENT_SECRETS_FILE")
-# # Scopes required for the Generative Language API
-# SCOPES = ["https://www.googleapis.com/auth/generative-language.tuning", "https://www.googleapis.com/auth/cloud-platform"]
-
-# # View for Text Emotion Detection
-# class TextEmotionAnalysisView(APIView):
+# class AudioEmotionAnalysisView(APIView):
 #     """
-#     API view for analyzing the emotional content of text input.
+#     API view for analyzing emotions from an audio input.
+    
+#     This view handles audio file uploads, transcribes the audio to text using AssemblyAI, 
+#     analyzes the emotional state of the speaker based on the transcription using the Gemini API, 
+#     and saves the analysis results to the database.
 
-#     This view accepts a POST request with text data and returns the detected emotions 
-#     using a generative language model.
+#     Methods:
+#         post(request, *args, **kwargs): Handles POST requests to analyze uploaded audio files.
+#         transcribe_audio(audio_file_path): Transcribes the provided audio file.
+#         analyze_emotion(text): Predicts the emotional content of the provided text.
 #     """
-
-#     def post(self, request):
+    
+#     def post(self, request, *args, **kwargs):
 #         """
-#         Handle POST requests to analyze text emotions.
+#         Handles POST requests to analyze emotions from an audio file.
 
-#         Validates incoming data, processes the text through the emotion analysis model,
-#         and returns the result or an error message.
+#         This method validates the incoming request, uploads the audio file,
+#         transcribes the file using AssemblyAI, predicts emotions using the Gemini API, 
+#         and saves the analysis results in the database.
 
 #         Args:
-#             request (Request): The incoming HTTP request containing text data.
+#             request (Request): The incoming HTTP request containing the audio file.
 
 #         Returns:
-#             Response: A JSON response containing the input text and the detected emotions,
-#                       or an error message if validation fails or if there are issues with the analysis.
+#             Response: JSON response with the audio file path, transcription, 
+#                       predicted emotions, confidence score, or an error message.
 #         """
-#         serializer = TextEmotionAnalysisSerializer(data=request.data)
+#         serializer = AudioEmotionAnalysisSerializer(data=request.data)
 #         if serializer.is_valid():
-#             # Process the text input using Gemini API
-#             input_text = serializer.validated_data.get('input_text')
-#             emotion_analysis_result = self.get_emotion_analysis(input_text)
+#             audio_file = request.FILES['audio_file']
+            
+#             # Save the audio file to initiate transcription and analysis
+#             instance = serializer.save()
+
+#             # Transcribe the audio using AssemblyAI
+#             transcription_result = self.transcribe_audio(instance.audio_file.path)
+
+#             if "error" in transcription_result:
+#                 return Response({"error": transcription_result["error"]}, status=status.HTTP_400_BAD_REQUEST)
+
+#             # Analyze the transcription for emotions
+#             emotion_analysis_result = self.analyze_emotion(transcription_result['transcript_text'])
 
 #             if "error" in emotion_analysis_result:
 #                 return Response({"error": emotion_analysis_result["error"]}, status=status.HTTP_400_BAD_REQUEST)
-            
-#             return Response({'input_text': input_text, "emotions": emotion_analysis_result}, status=status.HTTP_200_OK)
+
+#             # Save results to the database
+#             instance.transcript_text = transcription_result['transcript_text']
+#             instance.emotion = emotion_analysis_result['emotion']
+#             instance.confidence_score = emotion_analysis_result['confidence_score']
+#             instance.save()
+
+#             return Response(AudioEmotionAnalysisSerializer(instance).data, status=status.HTTP_200_OK)
         
 #         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-#     def get_emotion_analysis(self, input_text):
+#     def transcribe_audio(self, audio_file_path):
 #         """
-#         Interact with the Gemini API to analyze emotions in the given text.
-
-#         Prepares the input text with a specific prompt, performs OAuth 2.0 authentication,
-#         and sends the request to the Gemini API to retrieve emotion analysis.
+#         Transcribes the audio file at the specified path using AssemblyAI.
 
 #         Args:
-#             input_text (str): The text input to be analyzed for emotional content.
+#             audio_file_path (str): The path to the audio file for transcription.
 
 #         Returns:
-#             dict: The result of the emotion analysis, or an error message if the API call fails.
+#             dict: A dictionary containing the transcription text and speaker labels 
+#                 or an error message if transcription fails.
 #         """
-#         # Add guiding prompt to analyze emotion directly
-#         modified_input_text = f"{input_text} Analyze the emotional state of the speaker."
+#         try:
+#             transcriber = aai.Transcriber()
+#             config = aai.TranscriptionConfig(speaker_labels=True)
 
-#         # Perform the OAuth 2.0 flow to get credentials
+#             # Attempt transcription of the audio file
+#             transcript = transcriber.transcribe(audio_file_path, config)
+
+#             # Check if transcription was successful
+#             if transcript.status == aai.TranscriptStatus.error:
+#                 return {"error": f"Transcription failed: {transcript.error}"}
+
+#             # Safely access speaker labels, providing an empty list if missing
+#             speaker_labels = getattr(transcript, "speaker_labels", [])
+            
+#             return {
+#                 'transcript_text': transcript.text,
+#                 'speaker_labels': speaker_labels
+#         }
+    
+#         except Exception as e:
+#             # Capture any other unexpected exceptions and return an error message
+#             return {"error": f"An error occurred during transcription: {str(e)}"}
+
+#     def analyze_emotion(self, text):
+#         """
+#         Analyzes the emotional content of transcribed text using the Gemini API.
+
+#         This method initiates an OAuth flow for authorization, sends the transcribed text
+#         to the Gemini API for emotion analysis, and extracts the emotion and confidence score.
+
+#         Args:
+#             text (str): The transcribed text to analyze for emotions.
+
+#         Returns:
+#             dict: A dictionary containing the predicted emotion and confidence score 
+#                   or an error message if the API call fails.
+#         """
+#         # Perform OAuth 2.0 flow for authorization
 #         flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRETS_FILE, SCOPES)
 #         credentials = flow.run_local_server(port=8080)
-#         # Now you have the OAuth token
 #         access_token = credentials.token
 
-#         # Use the access token in your API request
-#         api_key = "AIzaSyD46CMD2uVfdLQYTgCHTaqX7A4VSQpadSg"
+#         # Define Gemini API endpoint
 #         api_endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent"
+#         modified_input_text = f"{text} Analyze the emotional state of the speaker."
 
-#         # Payload with modified prompt
 #         payload = {
 #             "contents": [
 #                 {
@@ -497,50 +568,295 @@ class AudioEmotionAnalysisView(APIView):
 #         }
 
 #         # Send request to Gemini API
+#         api_key = "AIzaSyD46CMD2uVfdLQYTgCHTaqX7A4VSQpadSg"
 #         response = requests.post(f"{api_endpoint}?key={api_key}", json=payload, headers=headers)
-        
-#         # Handle response and error-check
+
 #         if response.status_code == 200:
 #             result = response.json()
-#             emotion_text = result.get("contents", [{}])[0].get("parts", [{}])[0].get("text", "")
-#             return emotion_text
+#             emotion_text = result.get("contents", [{}])[0].get("parts", [{}])[0].get("text", "unknown")
+#             confidence_score = result.get("confidence_score", 0.95)  # Replace with actual confidence score if available
+#             return {'emotion': emotion_text, 'confidence_score': confidence_score}
 #         else:
 #             return {"error": f"Error {response.status_code}: {response.text}"}
 
-# # View for Audio Emotion Detection
-# class AudioEmotionAnalysisView(APIView):
-#     def post(self, request):
-#         serializer = AudioEmotionAnalysisSerializer(data=request.data)
-#         if serializer.is_valid():
-#             audio_file = serializer.validated_data.get('audio_file')
-#             # Speech to text (AssemblyAi) API integration
+
+# # # View for Audio Emotion Detection
+# # class AudioEmotionAnalysisView(APIView):
+# #     """
+# #     API view for analyzing the emotional content of audio input by transcribing speech to text
+# #     and predicting the emotion of the speaker using the Gemini API.
+# #     """
+
+# #     def post(self, request, *args, **kwargs):
+# #         """
+# #         Handle POST requests to analyze audio emotions.
+
+# #         Validates incoming data, transcribes the audio using the AssemblyAI API,
+# #         and predicts the emotional state of the speaker based on the transcription,
+# #         saving the results to the database.
+
+# #         Args:
+# #             request (Request): The incoming HTTP request containing the audio file.
+
+# #         Returns:
+# #             Response: A JSON response containing the audio file, the transcribed text,
+# #                       and predicted emotions, or an error message if validation fails
+# #                       or if transcription fails.
+# #         """
+# #         from .audio_model import AudioEmotionAnalysis as AudioAnalysisModel
+# #         serializer = AudioEmotionAnalysisSerializer(data=request.data)
+# #         if serializer.is_valid():
+# #             audio_file = serializer.validated_data.get('audio_file_url')
+
+# #             # Use AssemblyAI to transcribe the audio
+# #             transcription_result = self.transcribe_audio(audio_file)
+
+# #             if "error" in transcription_result:
+# #                 return Response({"error": transcription_result["error"]}, status=status.HTTP_400_BAD_REQUEST)
+
+# #             # Use the transcribed text to analyze emotion
+# #             emotion_analysis_result = self.analyze_emotion(transcription_result['transcript_text'])
+
+# #             if "error" in emotion_analysis_result:
+# #                 return Response({"error": emotion_analysis_result["error"]}, status=status.HTTP_400_BAD_REQUEST)
+
+# #             # Save the analysis result to the database
+# #             analysis_record = AudioAnalysisModel(
+# #                 audio_file_url=str(audio_file),
+# #                 transcript_text=transcription_result['transcript_text'],
+# #                 emotion=emotion_analysis_result['emotion'],
+# #                 confidence_score=emotion_analysis_result['confidence_score']
+# #             )
+# #             analysis_record.save()
+
+# #             return Response({
+# #                 'audio_file': str(audio_file),
+# #                 'transcription': transcription_result['transcript_text'],
+# #                 'predicted_emotion': emotion_analysis_result['emotion'],
+# #                 'confidence_score': emotion_analysis_result['confidence_score']
+# #             }, status=status.HTTP_200_OK)
+
+# #         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+# #     def transcribe_audio(self, audio_file):
+# #         """
+# #         Transcribe the audio file using AssemblyAI.
+
+# #         Args:
+# #             audio_file (File): The audio file to be transcribed.
+
+# #         Returns:
+# #             dict: A dictionary containing the transcribed text or an error message if transcription fails.
+# #         """
+# #         transcriber = aai.Transcriber()
+# #         config = aai.TranscriptionConfig(speaker_labels=True)
+
+# #         # Transcribe the audio file
+# #         transcript = transcriber.transcribe(audio_file, config)
+
+# #         if transcript.status == aai.TranscriptStatus.error:
+# #             return {"error": f"Transcription failed: {transcript.error}"}
+
+# #         return {
+# #             'transcript_text': transcript.text,
+# #             'speaker_labels': transcript.speaker_labels
+# #         }
+
+# #     def analyze_emotion(self, text):
+# #         """
+# #         Analyze the emotional state of the speaker based on transcribed text using the Gemini API.
+
+# #         Args:
+# #             text (str): The transcribed text to analyze.
+
+# #         Returns:
+# #             dict: A dictionary containing the predicted emotion and confidence score, or an error message if the API call fails.
+# #         """
+# #         # Perform the OAuth 2.0 flow to get credentials
+# #         flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRETS_FILE, SCOPES)
+# #         credentials = flow.run_local_server(port=8080)
+# #         access_token = credentials.token
+
+# #         # Define the Gemini API endpoint and headers
+# #         api_key = "AIzaSyD46CMD2uVfdLQYTgCHTaqX7A4VSQpadSg"
+# #         api_endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent"
+
+# #         # Prepare the prompt for emotion analysis
+# #         modified_input_text = f"{text} Analyze the emotional state of the speaker."
+
+# #         payload = {
+# #             "contents": [
+# #                 {
+# #                     "parts": [
+# #                         {
+# #                             "text": modified_input_text
+# #                         }
+# #                     ]
+# #                 }
+# #             ]
+# #         }
+
+# #         headers = {
+# #             "Authorization": f"Bearer {access_token}",
+# #             "Content-Type": "application/json"
+# #         }
+
+# #         # Send request to Gemini API
+# #         response = requests.post(f"{api_endpoint}?key={api_key}", json=payload, headers=headers)
+
+# #         # Handle response and extract emotion
+# #         if response.status_code == 200:
+# #             result = response.json()
+# #             emotion_text = result.get("contents", [{}])[0].get("parts", [{}])[0].get("text", "unknown")
+# #             confidence_score = result.get("confidence_score", 0.95)  # Replace with actual confidence score if available
+# #             return {'emotion': emotion_text, 'confidence_score': confidence_score}
+# #         else:
+# #             return {"error": f"Error {response.status_code}: {response.text}"}
+
+# # from django.shortcuts import render
+# # from rest_framework.views import APIView
+# # from rest_framework.response import Response
+# # from rest_framework import status
+# # from .serializers import TextEmotionAnalysisSerializer, AudioEmotionAnalysisSerializer
+# # from .text_model import TextEmotionAnalysis
+# # from .audio_model import AudioEmotionAnalysis
+# # import assemblyai as aai
+# # from google.oauth2.credentials import Credentials
+# # from google_auth_oauthlib.flow import InstalledAppFlow
+# # import requests
+# # import json
+# # import os
+
+# # # Path to your downloaded OAuth credentials file
+# # CLIENT_SECRETS_FILE = os.getenv("CLIENT_SECRETS_FILE")
+# # # Scopes required for the Generative Language API
+# # SCOPES = ["https://www.googleapis.com/auth/generative-language.tuning", "https://www.googleapis.com/auth/cloud-platform"]
+
+# # # View for Text Emotion Detection
+# # class TextEmotionAnalysisView(APIView):
+# #     """
+# #     API view for analyzing the emotional content of text input.
+
+# #     This view accepts a POST request with text data and returns the detected emotions 
+# #     using a generative language model.
+# #     """
+
+# #     def post(self, request):
+# #         """
+# #         Handle POST requests to analyze text emotions.
+
+# #         Validates incoming data, processes the text through the emotion analysis model,
+# #         and returns the result or an error message.
+
+# #         Args:
+# #             request (Request): The incoming HTTP request containing text data.
+
+# #         Returns:
+# #             Response: A JSON response containing the input text and the detected emotions,
+# #                       or an error message if validation fails or if there are issues with the analysis.
+# #         """
+# #         serializer = TextEmotionAnalysisSerializer(data=request.data)
+# #         if serializer.is_valid():
+# #             # Process the text input using Gemini API
+# #             input_text = serializer.validated_data.get('input_text')
+# #             emotion_analysis_result = self.get_emotion_analysis(input_text)
+
+# #             if "error" in emotion_analysis_result:
+# #                 return Response({"error": emotion_analysis_result["error"]}, status=status.HTTP_400_BAD_REQUEST)
             
-#             import assemblyai as aai
+# #             return Response({'input_text': input_text, "emotions": emotion_analysis_result}, status=status.HTTP_200_OK)
+        
+# #         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-#             aai.settings.api_key = "96452f4e5a3e4d2c8f6ac2d7ff6f9485"
+# #     def get_emotion_analysis(self, input_text):
+# #         """
+# #         Interact with the Gemini API to analyze emotions in the given text.
 
-#             transcriber = aai.Transcriber()
+# #         Prepares the input text with a specific prompt, performs OAuth 2.0 authentication,
+# #         and sends the request to the Gemini API to retrieve emotion analysis.
 
-#             # You can use a local filepath:
-#             # audio_file = "./example.mp3"
+# #         Args:
+# #             input_text (str): The text input to be analyzed for emotional content.
 
-#             # Or use a publicly-accessible URL:
-#             # audio_file = (
-#             #     "https://assembly.ai/sports_injuries.mp3"
-#             # )
+# #         Returns:
+# #             dict: The result of the emotion analysis, or an error message if the API call fails.
+# #         """
+# #         # Add guiding prompt to analyze emotion directly
+# #         modified_input_text = f"{input_text} Analyze the emotional state of the speaker."
 
-#             config = aai.TranscriptionConfig(speaker_labels=True)
+# #         # Perform the OAuth 2.0 flow to get credentials
+# #         flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRETS_FILE, SCOPES)
+# #         credentials = flow.run_local_server(port=8080)
+# #         # Now you have the OAuth token
+# #         access_token = credentials.token
 
-#             transcript = transcriber.transcribe(audio_file, config)
+# #         # Use the access token in your API request
+# #         api_key = "AIzaSyD46CMD2uVfdLQYTgCHTaqX7A4VSQpadSg"
+# #         api_endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent"
 
-#             if transcript.status == aai.TranscriptStatus.error:
-#                 print(f"Transcription failed: {transcript.error}")
-#                 exit(1)
+# #         # Payload with modified prompt
+# #         payload = {
+# #             "contents": [
+# #                 {
+# #                     "parts": [
+# #                         {
+# #                             "text": modified_input_text
+# #                         }
+# #                     ]
+# #                 }
+# #             ]
+# #         }
 
-#             print(transcript.text)
+# #         headers = {
+# #             "Authorization": f"Bearer {access_token}",
+# #             "Content-Type": "application/json"
+# #         }
+
+# #         # Send request to Gemini API
+# #         response = requests.post(f"{api_endpoint}?key={api_key}", json=payload, headers=headers)
+        
+# #         # Handle response and error-check
+# #         if response.status_code == 200:
+# #             result = response.json()
+# #             emotion_text = result.get("contents", [{}])[0].get("parts", [{}])[0].get("text", "")
+# #             return emotion_text
+# #         else:
+# #             return {"error": f"Error {response.status_code}: {response.text}"}
+
+# # # View for Audio Emotion Detection
+# # class AudioEmotionAnalysisView(APIView):
+# #     def post(self, request):
+# #         serializer = AudioEmotionAnalysisSerializer(data=request.data)
+# #         if serializer.is_valid():
+# #             audio_file = serializer.validated_data.get('audio_file')
+# #             # Speech to text (AssemblyAi) API integration
             
-#             # For simplicity, assume it returns the following emotions
-#             # emotions = ['angry', 'neutral']  # This should come from AssemblyAI response
+# #             import assemblyai as aai
+
+# #             aai.settings.api_key = "96452f4e5a3e4d2c8f6ac2d7ff6f9485"
+
+# #             transcriber = aai.Transcriber()
+
+# #             # You can use a local filepath:
+# #             # audio_file = "./example.mp3"
+
+# #             # Or use a publicly-accessible URL:
+# #             # audio_file = (
+# #             #     "https://assembly.ai/sports_injuries.mp3"
+# #             # )
+
+# #             config = aai.TranscriptionConfig(speaker_labels=True)
+
+# #             transcript = transcriber.transcribe(audio_file, config)
+
+# #             if transcript.status == aai.TranscriptStatus.error:
+# #                 print(f"Transcription failed: {transcript.error}")
+# #                 exit(1)
+
+# #             print(transcript.text)
             
-#             return Response({'audio_file': str(audio_file), 'emotions': transcript.text}, status=status.HTTP_200_OK)
-#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+# #             # For simplicity, assume it returns the following emotions
+# #             # emotions = ['angry', 'neutral']  # This should come from AssemblyAI response
+            
+# #             return Response({'audio_file': str(audio_file), 'emotions': transcript.text}, status=status.HTTP_200_OK)
+# #         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

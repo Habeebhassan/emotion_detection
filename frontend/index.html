@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Emotion Detection</title>
+    <link rel="stylesheet" href="css/main.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Emotion Detection</h1>
+        
+        <!-- Text Analysis Form -->
+        <form id="text-form">
+            <label for="inputText">Enter Text:</label>
+            <textarea id="inputText" placeholder="Type your text here..."></textarea>
+            <button type="submit">Analyze Emotion</button>
+        </form>
+        
+        <!-- Audio Analysis Form -->
+        <form id="audio-form">
+            <label for="inputAudio">Upload Audio:</label>
+            <input type="file" id="inputAudio" accept="audio/*">
+            <button type="submit">Analyze Audio Emotion</button>
+        </form>
+        
+        <!-- Results Section -->
+        <div id="results">
+            <h3>Analysis Result:</h3>
+            <p><strong>Predicted Emotion:</strong> <span id="emotion"></span></p>
+            <p><strong>Confidence Score:</strong> <span id="confidence"></span></p>
+        </div>
+    </div>
+    <!-- Load config.js as a module first -->
+    <script type="module" src="js/config.js"></script>
+    
+    <!-- Load app.js as a module -->
+    <script type="module" src="js/app.js"></script>
+
+</body>
+</html>

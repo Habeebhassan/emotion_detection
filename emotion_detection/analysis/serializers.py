@@ -14,6 +14,9 @@ class TextEmotionAnalysisSerializer(serializers.ModelSerializer):
         input_text (str): The input text to be analyzed for emotions.
         emotion (str): The predicted emotion from the input text.
     """
+
+    emotion = serializers.CharField(required=False, allow_null=True)
+
     class Meta:
         model = TextEmotionAnalysis
         fields = ['input_text', 'emotion']
