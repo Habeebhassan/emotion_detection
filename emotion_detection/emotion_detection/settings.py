@@ -69,6 +69,29 @@ CORS_ALLOW_ALL_ORIGINS = True
 
 ROOT_URLCONF = 'emotion_detection.urls'
 
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'level': 'INFO',  # Ensure 'INFO' logs are captured
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': 'INFO',  # Capture INFO logs for Django framework
+            'propagate': True,
+        },
+        'analysis': {
+            'handlers': ['console'],
+            'level': 'INFO',  # Capture INFO logs for your app
+            'propagate': False,
+        },
+    },
+}
+
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',

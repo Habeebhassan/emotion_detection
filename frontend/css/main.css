@@ -79,6 +79,7 @@ form button:hover {
     background-color: #f9f9f9;
     border: 1px solid #ddd;
     border-radius: 4px;
+    min-height: 50px;
 }
 
 #results h3 {
@@ -100,9 +101,13 @@ form button:hover {
 #confidence {
     font-size: 1.2em;
     color: #4CAF50;
+    background-color: #f4f4f9;  /* Light background to contrast */
+    padding: 5px;
+    border-radius: 4px;
 }
 
 #error-message {
     color: red;
     font-size: 1.1em;
+    margin-top: 10px; 
 }

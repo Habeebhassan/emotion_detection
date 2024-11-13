@@ -44,14 +44,25 @@ class TextEmotionAnalysisView(APIView):
         Handle POST requests to analyze text for mental health conditions like Depression, Suicide, and Distress.
         """
         from .text_model import TextEmotionAnalysis
+        
+        logger.info("POST request received at /api/analyze-text/")  # Log the start of the request
         serializer = TextEmotionAnalysisSerializer(data=request.data)
         
         if serializer.is_valid():
             input_text = serializer.validated_data.get('input_text')
             emotion_analysis_result = self.analyze_emotion(input_text)
 
+             # Log the emotion analysis result before returning
+            logger.info(f"Emotion analysis result: {emotion_analysis_result}")
+
+
             if "error" in emotion_analysis_result:
                 return Response({"error": emotion_analysis_result["error"]}, status=status.HTTP_400_BAD_REQUEST)
+
+
+            # Log the successful result being returned
+            logger.info(f"Returning analysis result: {emotion_analysis_result}")
+
 
             # Save the analysis result to the database
             analysis_record = TextEmotionAnalysis(
@@ -67,6 +78,7 @@ class TextEmotionAnalysisView(APIView):
                 'confidence_score': emotion_analysis_result['confidence_score']
             }, status=status.HTTP_200_OK)
 
+        logger.error(f"Serializer errors: {serializer.errors}")
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def analyze_emotion(self, input_text):
