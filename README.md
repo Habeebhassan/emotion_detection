@@ -1,201 +1,143 @@
 # Emotion Detection & Mood Prediction API
 
-This is an API service that detects emotions from text and audio inputs. It leverages external APIs for text analysis and voice transcription, integrating the functionality into a Django REST Framework application.
-
----
+This project provides an API that detects emotions from both text and audio inputs, with a frontend for interaction. The backend, built with Django, supports endpoints for text and audio emotion analysis, while the frontend, implemented with HTML, CSS, and JavaScript, connects to the API and displays results.
 
 ## Table of Contents
-
+- [Project Overview](#project-overview)
+- [Technologies Used](#technologies-used)
 - [Features](#features)
-- [Prerequisites](#prerequisites)
+- [Emotion Labels](#emotion-labels)
 - [Installation](#installation)
-- [Environment Setup](#environment-setup)
-- [Running the API](#running-the-api)
+- [Usage](#usage)
+  - [Running the Backend](#running-the-backend)
+  - [Running the Frontend](#running-the-frontend)
+  - [Using the Application](#using-the-application)
 - [API Endpoints](#api-endpoints)
-- [Testing the API](#testing-the-api)
-- [Troubleshooting](#troubleshooting)
+- [License](#license)
 
 ---
+
+## Project Overview
+The Emotion Detection & Mood Prediction API is designed to predict emotions based on user-provided text or audio files. The goal is to provide meaningful emotional analysis for applications in mental health and well-being. The API integrates external services for text analysis and voice transcription to derive predictions.
+
+## Technologies Used
+- **Backend**: Django, Django REST framework
+- **Frontend**: HTML, CSS, JavaScript
+- **Model**: Mental-BERT model (for text-based and audio-based emotion classification)
+- **API Integrations**: AssemblyAI (for audio transcription), Gemini (for text-based emotion analysis)
+- **Development Tools**: VSCode, Live Server (for frontend development)
+- **Environment**: Virtualenv for Python dependency management
 
 ## Features
-
-- **Text Emotion Detection**: Detects emotions from a text input using a text analysis model.
-- **Audio Emotion Detection**: Converts audio to text and analyzes the emotions in the spoken content.
-- **Supports Multiple Emotions**: Analyzes content for multiple emotional categories, like joy, sadness, anger, etc.
+- Text-based emotion detection
+- Audio-based emotion detection with transcription
+- Confidence scores for predictions
+- User-friendly frontend interface
+- Cross-Origin Resource Sharing (CORS) setup for frontend-backend communication
 
 ---
 
-## Prerequisites
+## Emotion Labels
+The project currently uses the **Mental-BERT** model, pre-trained for emotion classification, with a specific set of binary labels relevant to mental health. These labels include:
 
-Ensure the following are installed:
+- **Depression / No Depression**
+- **Suicide / No Suicide**
+- **Distress / No Distress**
 
-- Python 3.8+ 
-- Django 4.x
-- Django REST Framework
-- Virtual Environment (recommended)
-- External API access keys for:
-  - AssemblyAI (for audio transcription)
-  - Gemini or similar text analysis API (for emotion detection in text)
+The model is configured to classify each input (text or transcribed audio) according to these categories, making it particularly useful for mental health screening applications.
 
 ---
 
 ## Installation
 
-Clone this repository and install the required dependencies.
+### Prerequisites
+- Python 3.x
+- Node.js
+- Virtualenv (for Python)
+- Visual Studio Code (recommended for using Live Server)
 
-### Step 1: Clone the Repository
+### Backend Setup
+1. **Clone the Repository**:
+    ```bash
+    git clone <repository-url>
+    cd <repository-directory>
+    ```
 
-```bash
-git clone https://github.com/your-username/emotion-detection-api.git
-cd emotion-detection-api
-```
+2. **Set Up Virtual Environment**:
+    ```bash
+    python -m venv venv
+    source venv/bin/activate  # On Windows: venv\Scripts\activate
+    ```
 
-### Step 2: Set Up a Virtual Environment
+3. **Install Dependencies**:
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-```bash
-python3 -m venv env
-source env/bin/activate  # On Windows, use `env\Scripts\activate`
-```
+4. **Configure Django Settings**:
+   - Ensure that your Django `settings.py` is set up to handle audio file uploads with `MEDIA_ROOT` and `MEDIA_URL`.
+   - Configure any required API keys for AssemblyAI and Gemini in your settings.
 
-### Step 3: Install Dependencies
+5. **Run Django Migrations**:
+    ```bash
+    python manage.py migrate
+    ```
 
-```bash
-pip install -r requirements.txt
-```
+6. **Start the Backend Server**:
+    ```bash
+    python manage.py runserver
+    ```
 
-### Step 4: Database Setup
+### Frontend Setup
+The frontend will be served through VSCode's Live Server to bypass CORS issues.
 
-Initialize the database by running migrations.
+1. **Open the Project in VSCode**:
+   Open the project directory in Visual Studio Code.
 
-```bash
-python manage.py makemigrations
-python manage.py migrate
-```
+2. **Install Live Server Extension**:
+   - In VSCode, go to Extensions and install the [Live Server](https://marketplace.visualstudio.com/items?itemName=ritwickdey.LiveServer) extension.
 
----
-
-## Environment Setup
-
-Configure your environment variables. In the project root, create a `.env` file to store sensitive configurations:
-
-```plaintext
-# .env file
-DJANGO_SECRET_KEY=your_secret_key
-DEBUG=True
-ASSEMBLYAI_API_KEY=your_assemblyai_key
-GEMINI_API_KEY=your_gemini_key
-```
-
-> **Note**: Replace `your_secret_key`, `your_assemblyai_key`, and `your_gemini_key` with actual values.
-
----
-
-## Running the API
-
-1. **Start the Django Server**
-
-   ```bash
-   python manage.py runserver
-   ```
-
-2. **Access the API locally**
-
-   By default, the API will be available at `http://127.0.0.1:8000/`.
+3. **Start Live Server**:
+   - Right-click on `index.html` in the frontend directory and select **"Open with Live Server"**.
+   - The frontend should be accessible at `http://127.0.0.1:5500` or a similar port.
 
 ---
 
-## API Endpoints
+## Usage
 
-### 1. **Text Emotion Detection**
+### Running the Backend
+- Make sure the virtual environment is activated.
+- Start the backend server with:
+    ```bash
+    python manage.py runserver
+    ```
 
-   - **URL**: `/api/analyze-text/`
-   - **Method**: `POST`
-   - **Content-Type**: `application/json`
-   - **Request Body**:
-     ```json
-     {
-       "text": "I am feeling really happy today!"
-     }
-     ```
-   - **Response**:
-     ```json
-     {
-       "text": "I am feeling really happy today!",
-       "emotions": {
-         "joy": 0.85,
-         "sadness": 0.05,
-         "anger": 0.02,
-         "surprise": 0.08
-       }
-     }
-     ```
+### Running the Frontend
+- Open `index.html` in VSCode and start it with Live Server to bypass CORS.
+- This should open a new browser window with the application running on a local port.
 
-### 2. **Audio Emotion Detection**
+### Using the Application
+1. **Text Analysis**:
+   - Enter a piece of text in the "Enter Text" field and click **"Analyze Emotion"**.
+   - The predicted emotion and confidence score will appear below.
 
-   - **URL**: `/api/analyze-audio/`
-   - **Method**: `POST`
-   - **Content-Type**: `multipart/form-data`
-   - **Request Body**:
-     - `audio_file`: Attach an audio file (e.g., .wav or .mp3)
-   - **Response**:
-     ```json
-     {
-       "transcription": "I'm excited to start this new project.",
-       "emotions": {
-         "joy": 0.78,
-         "sadness": 0.1,
-         "anger": 0.05,
-         "surprise": 0.07
-       }
-     }
-     ```
+2. **Audio Analysis**:
+   - Select an audio file by clicking **"Upload Audio"**.
+   - Click **"Analyze Audio Emotion"** to submit.
+   - The results, including a transcription (if available), predicted emotion, and confidence score, will display below.
 
----
+### API Endpoints
+- **Text Analysis**: `/analyze-text/`
+  - Method: `POST`
+  - Payload: `{ "input_text": "<text>" }`
+  - Response: `{ "predicted_emotion": "<emotion>", "confidence_score": <score> }`
 
-## Testing the API
-
-You can use tools like **Postman** or **curl** to test the API.
-
-### Example with curl
-
-```bash
-# Text Emotion Analysis
-curl -X POST http://127.0.0.1:8000/api/analyze-text/ \
-     -H "Content-Type: application/json" \
-     -d '{"text": "Feeling grateful and happy"}'
-```
-
-```bash
-# Audio Emotion Analysis
-curl -X POST http://127.0.0.1:8000/api/analyze-audio/ \
-     -F "audio_file=@path/to/your/audio/file.wav"
-```
-
-### Example with Postman
-
-1. Open **Postman** and create a new **POST** request.
-2. For text emotion analysis, go to **Body** > **raw**, select JSON format, and add the text input.
-3. For audio emotion analysis, go to **Body** > **form-data**, and add `audio_file` as a key with an audio file as the value.
-
----
-
-## Troubleshooting
-
-1. **404 Not Found**: Ensure that the API endpoint URL is correct and that the server is running.
-2. **500 Server Error**: Check if your API keys and environment variables are set correctly.
-3. **AppRegistryNotReady**: Restart the server to load apps properly after making changes.
-4. **Field Errors**: Ensure all model fields are properly declared in both the model and serializer.
-
----
-
-## Contributing
-
-Contributions are welcome! Please submit a pull request with a detailed description of your changes.
+- **Audio Analysis**: `/analyze-audio/`
+  - Method: `POST`
+  - Payload: Audio file in form-data format
+  - Response: `{ "predicted_emotion": "<emotion>", "confidence_score": <score>, "transcript": "<text>" }`
 
 ---
 
 ## License
-
-This project is licensed under the MIT License.
-
----
+This project is licensed under the MIT License. See `LICENSE` for details.
